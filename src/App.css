@@ -1,0 +1,71 @@
+#root {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  background-color: #ffffff;
+}
+
+/* Ensure ReactFlow default z-index favors nodes over groups */
+.react-flow__node {
+  z-index: 2;
+}
+.react-flow__node-group {
+  z-index: 0;
+}
+
+.sidebar {
+  background-color: #f8fafc;
+  border-right: 1px solid #e2e8f0;
+}
+
+.main-content {
+  background-color: #ffffff;
+}
+
+/* React Flow tweaks */
+.react-flow__node {
+  box-sizing: border-box;
+}
+.react-flow__node-group {
+  box-sizing: border-box;
+}
+.react-flow__edge-path {
+  pointer-events: none;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
