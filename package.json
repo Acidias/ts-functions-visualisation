@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=20.19.0 <21"
   },
   "scripts": {
     "dev": "vite",
@@ -16,6 +16,7 @@
     "@ts-morph/common-npm": "npm:@ts-morph/common@^0.27.0",
     "@xyflow/react": "^12.8.2",
     "elkjs": "0.10.0",
+    "@viz-js/viz": "3.7.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "ts-morph-npm": "npm:ts-morph@26.0.0"

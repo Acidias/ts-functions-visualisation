@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import "./App.css";
 import { pickDirectory, loadProjectFromDirectory, type DirectoryNode, enumerateFilesUnder } from "./fs";
-import { analyzeDirectoryGraph, analyzeDirectoryModules, buildProjectAndAnalyze } from "./analysis";
+import { analyzeDirectoryGraph, analyzeWiringGraph, buildProjectAndAnalyze, type Graph } from "./analysis";
 import { TreeView } from "./TreeView";
 import { Mindmap } from "./Mindmap";
+import { DotView } from "./DotView";
 import { FlowView } from "./FlowView";
 
 function App() {
@@ -11,8 +12,9 @@ function App() {
   const [selectedDir, setSelectedDir] = useState<DirectoryNode | null>(null);
   const [projectRef, setProjectRef] = useState<ReturnType<typeof buildProjectAndAnalyze> | null>(null);
   const [groupByFile, setGroupByFile] = useState(true);
-  const [view, setView] = useState<"flow" | "mindmap">("flow");
-  const [modulesOnly, setModulesOnly] = useState(false);
+  const [view, setView] = useState<"flow" | "mindmap" | "dot">("flow");
+  const [graphType, setGraphType] = useState<"wiring" | "calls">("wiring");
+  const [detailGraph, setDetailGraph] = useState<Graph | null>(null);
   const [filterRoles, setFilterRoles] = useState<{ module: boolean; controller: boolean; service: boolean; provider: boolean; helper: boolean }>({
     module: true,
     controller: true,
@@ -24,7 +26,7 @@ function App() {
   const graph = useMemo(() => {
     if (!projectRef || !selectedDir) return { nodes: [], edges: [] };
     const files = enumerateFilesUnder(selectedDir).filter((p) => p.endsWith(".ts") || p.endsWith(".tsx"));
-    const g = modulesOnly ? analyzeDirectoryModules(projectRef, files) : analyzeDirectoryGraph(projectRef, files);
+    const g = graphType === "wiring" ? analyzeWiringGraph(projectRef, files) : analyzeDirectoryGraph(projectRef, files);
     // apply role filters (if role missing, treat as helper)
     type Role = "module" | "controller" | "service" | "provider" | "helper" | undefined;
     const nodes = g.nodes.filter((n) => {
@@ -39,7 +41,7 @@ function App() {
     const nodeIds = new Set(nodes.map((n) => n.id));
     const edges = g.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
     return { nodes, edges };
-  }, [projectRef, selectedDir, modulesOnly, filterRoles]);
+  }, [projectRef, selectedDir, graphType, filterRoles]);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: root ? "minmax(200px, 20%) 1fr" : "1fr", height: "100vh" }}>
@@ -93,10 +95,15 @@ function App() {
                   </label>
                 ))}
               </div>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 14 }}>
-                <input type="checkbox" checked={modulesOnly} onChange={(e) => setModulesOnly(e.target.checked)} />
-                Modules only
-              </label>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 10, fontSize: 14 }}>
+                <strong>Graph:</strong>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <input type="radio" name="graphType" checked={graphType === "wiring"} onChange={() => setGraphType("wiring")} /> Wiring
+                </label>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <input type="radio" name="graphType" checked={graphType === "calls"} onChange={() => setGraphType("calls")} /> Calls
+                </label>
+              </div>
               <div style={{ marginLeft: "auto", display: "inline-flex", gap: 8 }}>
                 <button
                   onClick={() => setView("flow")}
@@ -110,13 +117,63 @@ function App() {
                 >
                   Mindmap
                 </button>
+                <button
+                  onClick={() => setView("dot")}
+                  style={{ padding: "6px 10px", border: view === "dot" ? "1px solid #334155" : undefined, background: view === "dot" ? "#e2e8f0" : undefined }}
+                >
+                  Dot
+                </button>
               </div>
             </div>
-            <div style={{ height: "calc(100vh - 49px)", overflow: "hidden" }}>
-              {view === "flow" ? (
-                <FlowView graph={graph} groupByFile={groupByFile} />
-              ) : (
-                <Mindmap graph={graph} groupByFile={groupByFile} />
+            <div style={{ height: "calc(100vh - 49px)", overflow: "hidden", display: "grid", gridTemplateColumns: detailGraph ? "1fr minmax(380px, 40%)" : "1fr" }}>
+              <div>
+                {view === "flow" ? (
+                  <FlowView
+                    graph={graph}
+                    groupByFile={graphType === "calls" ? groupByFile : true}
+                    onNodeClick={(id) => {
+                      if (!projectRef || !selectedDir) return;
+                      if (graphType !== "wiring") return;
+                      // Drill-down: show call graph scoped to the clicked class/module file
+                      const clicked = graph.nodes.find((n) => n.id === id);
+                      if (!clicked) return;
+                      const files = enumerateFilesUnder(selectedDir).filter((p) => p.endsWith(".ts") || p.endsWith(".tsx"));
+                      const callGraph = analyzeDirectoryGraph(projectRef, files);
+                      // Scope to the same file or class
+                      const fileScopedIds = new Set(
+                        callGraph.nodes
+                          .filter((n) =>
+                            clicked.role === "module"
+                              ? n.fileKey.includes(clicked.fileKey.split(" ")[0])
+                              : n.filePath === clicked.filePath || n.className === clicked.label
+                          )
+                          .map((n) => n.id)
+                      );
+                      const scoped = {
+                        nodes: callGraph.nodes.filter((n) => fileScopedIds.has(n.id)),
+                        edges: callGraph.edges.filter((e) => fileScopedIds.has(e.from) && fileScopedIds.has(e.to)),
+                      } as Graph;
+                      setDetailGraph(scoped);
+                    }}
+                  />
+                ) : (
+                  view === "mindmap" ? (
+                    <Mindmap graph={graph} groupByFile={graphType === "calls" ? groupByFile : true} />
+                  ) : (
+                    <DotView graph={graph} />
+                  )
+                )}
+              </div>
+              {detailGraph && (
+                <div style={{ borderLeft: "1px solid #e5e7eb", minWidth: 360 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 8, borderBottom: "1px solid #eee", background: "#fafafa" }}>
+                    <strong>Details</strong>
+                    <button onClick={() => setDetailGraph(null)}>Close</button>
+                  </div>
+                  <div style={{ height: "calc(100% - 40px)" }}>
+                    <FlowView graph={detailGraph} groupByFile={true} />
+                  </div>
+                </div>
               )}
             </div>
           </main>
