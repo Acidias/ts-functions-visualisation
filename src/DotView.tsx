@@ -11,6 +11,9 @@ export function DotView({ graph }: DotViewProps) {
   const [scale, setScale] = useState<number>(1);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number }>({ w: 1200, h: 800 });
   const svgHostRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const isDraggingMiniRef = useRef(false);
+  const [scrollDims, setScrollDims] = useState<{ left: number; top: number; clientW: number; clientH: number }>({ left: 0, top: 0, clientW: 0, clientH: 0 });
   const dot = useMemo(() => generateDot(graph), [graph]);
 
   useEffect(() => {
@@ -64,7 +67,7 @@ export function DotView({ graph }: DotViewProps) {
   useEffect(() => {
     const host = svgHostRef.current;
     if (!host) return;
-    const scrollParent = host.parentElement?.parentElement; // size box parent is a fixed-size wrapper; its parent is scroller
+    const scrollParent = scrollRef.current; // our explicit scroll container
     if (!scrollParent) return;
     const availW = scrollParent.clientWidth - 16; // padding
     const availH = scrollParent.clientHeight - 16;
@@ -75,6 +78,86 @@ export function DotView({ graph }: DotViewProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [svg, naturalSize.w, naturalSize.h]);
+
+  // Track scroll and size of the scroll container for minimap viewport rectangle
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      setScrollDims({ left: el.scrollLeft, top: el.scrollTop, clientW: el.clientWidth, clientH: el.clientHeight });
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update as EventListener);
+      ro.disconnect();
+    };
+  }, [scale, svg, naturalSize.w, naturalSize.h]);
+
+  // Minimap sizing based on natural SVG size
+  const mini = useMemo(() => {
+    const maxW = 240;
+    const maxH = 180;
+    if (naturalSize.w <= 0 || naturalSize.h <= 0) return { w: 0, h: 0, s: 0 } as const;
+    const s = Math.min(maxW / naturalSize.w, maxH / naturalSize.h);
+    return { w: Math.max(1, Math.floor(naturalSize.w * s)), h: Math.max(1, Math.floor(naturalSize.h * s)), s } as const;
+  }, [naturalSize.w, naturalSize.h]);
+
+  // Viewport rectangle on minimap (in minimap pixels)
+  const miniViewport = useMemo(() => {
+    const { s: miniScale } = mini;
+    if (miniScale <= 0 || scale <= 0) return { x: 0, y: 0, w: 0, h: 0 } as const;
+    const wNat = scrollDims.clientW / scale;
+    const hNat = scrollDims.clientH / scale;
+    const xNat = scrollDims.left / scale;
+    const yNat = scrollDims.top / scale;
+    return {
+      x: xNat * miniScale,
+      y: yNat * miniScale,
+      w: Math.max(8, wNat * miniScale),
+      h: Math.max(8, hNat * miniScale),
+    } as const;
+  }, [mini, scrollDims.left, scrollDims.top, scrollDims.clientW, scrollDims.clientH, scale]);
+
+  const panToMiniCoord = (mx: number, my: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const miniScale = mini.s;
+    if (miniScale <= 0 || scale <= 0) return;
+    const natX = mx / miniScale;
+    const natY = my / miniScale;
+    const targetLeft = natX * scale - el.clientWidth / 2;
+    const targetTop = natY * scale - el.clientHeight / 2;
+    const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
+    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    el.scrollLeft = Math.max(0, Math.min(maxLeft, targetLeft));
+    el.scrollTop = Math.max(0, Math.min(maxTop, targetTop));
+  };
+
+  const onMiniMouseDown: React.MouseEventHandler<HTMLDivElement> = (e) => {
+    e.preventDefault();
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    isDraggingMiniRef.current = true;
+    panToMiniCoord(mx, my);
+    const onMove = (ev: MouseEvent) => {
+      if (!isDraggingMiniRef.current) return;
+      const r = rect; // stable during drag
+      const x = Math.max(0, Math.min(r.width, ev.clientX - r.left));
+      const y = Math.max(0, Math.min(r.height, ev.clientY - r.top));
+      panToMiniCoord(x, y);
+    };
+    const onUp = () => {
+      isDraggingMiniRef.current = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
 
   const scaledW = Math.max(1, Math.floor(naturalSize.w * scale));
   const scaledH = Math.max(1, Math.floor(naturalSize.h * scale));
@@ -112,14 +195,67 @@ export function DotView({ graph }: DotViewProps) {
           </button>
         </div>
       </div>
-      <div style={{ flex: 1, overflow: "auto" }}>
-        <div style={{ width: scaledW, height: scaledH, position: "relative" }}>
-          <div
-            ref={svgHostRef}
-            style={{ width: naturalSize.w, height: naturalSize.h, transform: `scale(${scale})`, transformOrigin: "0 0" }}
-            dangerouslySetInnerHTML={{ __html: svg }}
-          />
+      <div style={{ flex: 1, position: "relative" }}>
+        <div ref={scrollRef} style={{ position: "absolute", inset: 0, overflow: "auto" }}>
+          <div style={{ width: scaledW, height: scaledH, position: "relative" }}>
+            <div
+              ref={svgHostRef}
+              style={{ width: naturalSize.w, height: naturalSize.h, transform: `scale(${scale})`, transformOrigin: "0 0" }}
+              dangerouslySetInnerHTML={{ __html: svg }}
+            />
+          </div>
         </div>
+
+        {mini.s > 0 && (
+          <div
+            onMouseDown={onMiniMouseDown}
+            style={{
+              position: "absolute",
+              right: 12,
+              bottom: 12,
+              width: mini.w,
+              height: mini.h,
+              border: "1px solid #e2e8f0",
+              borderRadius: 6,
+              background: "rgba(255,255,255,0.9)",
+              boxShadow: "0 4px 10px rgba(0,0,0,0.08)",
+              cursor: "pointer",
+              zIndex: 5,
+              overflow: "hidden",
+            }}
+            aria-label="Minimap"
+            role="application"
+          >
+            <div style={{ width: mini.w, height: mini.h, position: "relative" }}>
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  width: naturalSize.w,
+                  height: naturalSize.h,
+                  transform: `scale(${mini.s})`,
+                  transformOrigin: "0 0",
+                  pointerEvents: "none",
+                }}
+                dangerouslySetInnerHTML={{ __html: svg }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  left: miniViewport.x,
+                  top: miniViewport.y,
+                  width: miniViewport.w,
+                  height: miniViewport.h,
+                  border: "2px solid #0ea5e9",
+                  background: "rgba(14,165,233,0.08)",
+                  boxSizing: "border-box",
+                  borderRadius: 2,
+                }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
