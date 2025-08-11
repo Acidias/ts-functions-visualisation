@@ -30,17 +30,51 @@ export function DotView({ graph }: DotViewProps) {
     return () => { cancelled = true; };
   }, [dot]);
 
-  // After SVG is injected, measure its intrinsic size (width/height or viewBox)
+  // After SVG is injected, measure its intrinsic size (prefer viewBox, fallback to getBBox)
   useEffect(() => {
     const host = svgHostRef.current;
     if (!host) return;
     const el = host.querySelector("svg") as SVGSVGElement | null;
     if (!el) return;
-    const vb = el.viewBox?.baseVal;
-    const w = vb && vb.width ? vb.width : (el.width?.baseVal?.value || naturalSize.w);
-    const h = vb && vb.height ? vb.height : (el.height?.baseVal?.value || naturalSize.h);
+    let w = Number(el.viewBox?.baseVal?.width || 0);
+    let h = Number(el.viewBox?.baseVal?.height || 0);
+    if (!w || !h) {
+      try {
+        const bbox = (el as unknown as { getBBox: () => { width: number; height: number } }).getBBox?.();
+        if (bbox && bbox.width && bbox.height) {
+          w = bbox.width;
+          h = bbox.height;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    if (!w || !h) {
+      const ww = Number(el.width?.baseVal?.value || 0);
+      const hh = Number(el.height?.baseVal?.value || 0);
+      if (ww && hh) {
+        w = ww;
+        h = hh;
+      }
+    }
     if (Number.isFinite(w) && Number.isFinite(h)) setNaturalSize({ w, h });
   }, [svg]);
+
+  // Auto-fit once when SVG and container are ready
+  useEffect(() => {
+    const host = svgHostRef.current;
+    if (!host) return;
+    const scrollParent = host.parentElement?.parentElement; // size box parent is a fixed-size wrapper; its parent is scroller
+    if (!scrollParent) return;
+    const availW = scrollParent.clientWidth - 16; // padding
+    const availH = scrollParent.clientHeight - 16;
+    if (availW > 0 && availH > 0 && naturalSize.w > 0 && naturalSize.h > 0) {
+      const s = Math.min(availW / naturalSize.w, availH / naturalSize.h);
+      // only set if different and only first time
+      setScale((prev) => (Math.abs(prev - s) > 0.001 ? s : prev));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [svg, naturalSize.w, naturalSize.h]);
 
   const scaledW = Math.max(1, Math.floor(naturalSize.w * scale));
   const scaledH = Math.max(1, Math.floor(naturalSize.h * scale));
@@ -62,7 +96,7 @@ export function DotView({ graph }: DotViewProps) {
         </button>
         <div style={{ marginLeft: 8, display: "inline-flex", gap: 6, alignItems: "center" }}>
           <button
-            onClick={() => setScale((s) => Math.max(0.25, Math.round((s - 0.1) * 10) / 10))}
+            onClick={() => setScale((s) => Math.max(0.05, Math.round((s - 0.1) * 10) / 10))}
             style={{ padding: "6px 10px" }}
             aria-label="Zoom out"
           >
@@ -70,7 +104,7 @@ export function DotView({ graph }: DotViewProps) {
           </button>
           <span style={{ minWidth: 52, textAlign: "center", fontSize: 12 }}>{Math.round(scale * 100)}%</span>
           <button
-            onClick={() => setScale((s) => Math.min(4, Math.round((s + 0.1) * 10) / 10))}
+            onClick={() => setScale((s) => Math.min(8, Math.round((s + 0.1) * 10) / 10))}
             style={{ padding: "6px 10px" }}
             aria-label="Zoom in"
           >
@@ -82,7 +116,7 @@ export function DotView({ graph }: DotViewProps) {
         <div style={{ width: scaledW, height: scaledH, position: "relative" }}>
           <div
             ref={svgHostRef}
-            style={{ transform: `scale(${scale})`, transformOrigin: "0 0" }}
+            style={{ width: naturalSize.w, height: naturalSize.h, transform: `scale(${scale})`, transformOrigin: "0 0" }}
             dangerouslySetInnerHTML={{ __html: svg }}
           />
         </div>
