@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlow, Background, Controls, MiniMap, MarkerType, Position, applyNodeChanges, applyEdgeChanges } from "@xyflow/react";
-import type { Node as FlowNode, Edge as FlowEdge, ReactFlowInstance, NodeChange, EdgeChange, NodeProps } from "@xyflow/react";
+import type { Node as FlowNode, Edge as FlowEdge, ReactFlowInstance, NodeChange, EdgeChange, NodeProps, Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { Graph } from "./analysis";
 import { computeHierarchicalLayout, computeElkFileClassLayout } from "./layout";
  
 
-export function FlowView({ graph, groupByFile = true }: { graph: Graph; groupByFile?: boolean }) {
+export function FlowView({ graph, groupByFile = true, onNodeClick }: { graph: Graph; groupByFile?: boolean; onNodeClick?: (nodeId: string) => void }) {
   const [elkNodes, setElkNodes] = useState<FlowNode[]>([]);
   const [elkEdges, setElkEdges] = useState<FlowEdge[]>([]);
   const rfRef = useRef<ReactFlowInstance | null>(null);
@@ -258,6 +258,9 @@ export function FlowView({ graph, groupByFile = true }: { graph: Graph; groupByF
         onInit={(inst: ReactFlowInstance) => {
           rfRef.current = inst;
           inst.fitView({ padding: 0.2 });
+        }}
+        onNodeClick={(_: React.MouseEvent, n: Node) => {
+          if (onNodeClick) onNodeClick(String(n.id));
         }}
         nodeTypes={{
           group: ({ id, data }: NodeProps) => {
